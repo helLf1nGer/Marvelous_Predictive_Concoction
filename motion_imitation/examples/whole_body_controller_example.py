@@ -39,6 +39,7 @@ flags.DEFINE_bool("use_real_robot", False,
                   "whether to use real robot or simulation")
 flags.DEFINE_bool("show_gui", False, "whether to show GUI.")
 flags.DEFINE_float("max_time_secs", 1., "maximum time to run the robot.")
+flags.DEFINE_bool("bumpy_terrain", False, "whether to use bumpy or flat terrain.")
 FLAGS = flags.FLAGS
 
 _NUM_SIMULATION_ITERATION_STEPS = 300
@@ -150,6 +151,39 @@ def _update_controller_params(controller, lin_speed, ang_speed):
   controller.stance_leg_controller.desired_speed = lin_speed
   controller.stance_leg_controller.desired_twisting_speed = ang_speed
 
+def load_bumpy_terrain(pybullet_client, using_gui):
+  n_rows = 128
+  n_cols = 128
+  heightfield_data = [0] * n_rows * n_cols
+  max_height_perturbation = 0.05
+  for j in range(int(n_rows / 2)):
+    for i in range(int(n_cols / 2)):
+      height = np.random.uniform(0, max_height_perturbation)
+      heightfield_data[2 * i + 2 * j * n_rows] = height
+      heightfield_data[2 * i + 1 + 2 * j * n_rows] = height
+      heightfield_data[2 * i + (2 * j + 1) * n_rows] = height
+      heightfield_data[2 * i + 1 + (2 * j + 1) * n_rows] = height
+
+  # Rendering while loading is slow.
+  if using_gui:
+    pybullet_client.configureDebugVisualizer(
+          pybullet_client.COV_ENABLE_RENDERING, 0)
+
+  terrain_shape = pybullet_client.createCollisionShape(
+      shapeType=pybullet_client.GEOM_HEIGHTFIELD,
+      flags=pybullet_client.GEOM_CONCAVE_INTERNAL_EDGE,
+      meshScale=[.15, .15, 1],
+      heightfieldData=heightfield_data,
+      numHeightfieldRows=n_rows,
+      numHeightfieldColumns=n_cols,
+      replaceHeightfieldIndex=-1)
+  terrain = pybullet_client.createMultiBody(0, terrain_shape)
+  texture_id = pybullet_client.loadTexture("checker_blue.png")
+  pybullet_client.changeVisualShape(
+        terrain, -1, textureUniqueId=texture_id, rgbaColor=(1, 1, 1, 1))
+  if using_gui:
+    pybullet_client.configureDebugVisualizer(
+          pybullet_client.COV_ENABLE_RENDERING, 1)
 
 def main(argv):
   """Runs the locomotion controller example."""
@@ -165,7 +199,10 @@ def main(argv):
   p.setGravity(0, 0, -9.8)
   p.setPhysicsEngineParameter(enableConeFriction=0)
   p.setAdditionalSearchPath(pybullet_data.getDataPath())
-  p.loadURDF("plane.urdf")
+  if FLAGS.bumpy_terrain:
+    load_bumpy_terrain(p, FLAGS.show_gui)
+  else:
+    p.loadURDF("plane.urdf")
 
   # Construct robot class:
   if FLAGS.use_real_robot:
@@ -202,12 +239,10 @@ def main(argv):
   current_time = start_time
   com_vels, imu_rates, actions = [], [], []
   while current_time - start_time < FLAGS.max_time_secs:
-    #time.sleep(0.0008) #on some fast computer, works better with sleep on real A1?
     start_time_robot = current_time
     start_time_wall = time.time()
     # Updates the controller behavior parameters.
     lin_speed, ang_speed, e_stop = command_function(current_time)
-    # print(lin_speed)
     if e_stop:
       logging.info("E-stop kicked, exiting...")
       break
@@ -225,7 +260,6 @@ def main(argv):
       actual_duration = time.time() - start_time_wall
       if actual_duration < expected_duration:
         time.sleep(expected_duration - actual_duration)
-    print("actual_duration=", actual_duration)
   if FLAGS.use_gamepad:
     gamepad.stop()
 
