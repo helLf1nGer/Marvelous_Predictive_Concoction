@@ -97,7 +97,7 @@ def compute_contact_force(robot,
                           reg_weight=1e-4,
                           friction_coef=0.45,
                           f_min_ratio=0.1,
-                          f_max_ratio=10.):
+                          f_max_ratio=10., solver_name='OSQP'):
     mass_matrix = compute_mass_matrix(
         robot.MPC_BODY_MASS,
         np.array(robot.MPC_BODY_INERTIA).reshape((3, 3)),
@@ -117,7 +117,7 @@ def compute_contact_force(robot,
     G += 1e-4 * np.eye(12)
 
     prob = cp.Problem(objective, constraints)
-    prob.solve(solver=cp.OSQP, eps_abs=1e-5)
+    prob.solve(solver=solver_name)
 
     contact_forces = forces.value
     # print("contact_forces: ", contact_forces)

@@ -12,7 +12,8 @@ import numpy as np
 
 from mpc_controller import gait_generator as gait_generator_lib
 from mpc_controller import leg_controller
-from mpc_controller import qp_torque_optimizer_cvxpy as qp_torque_optimizer
+from mpc_controller import qp_torque_optimizer_cvxpy
+from mpc_controller import qp_torque_optimizer
 
 _FORCE_DIMENSION = 3
 KP = np.array((0., 0., 100., 100., 100., 0.))
@@ -38,6 +39,7 @@ class TorqueStanceLegController(leg_controller.LegController):
         desired_body_height: float = 0.45,
         num_legs: int = 4,
         friction_coeffs: Sequence[float] = (0.45, 0.45, 0.45, 0.45),
+        solver_name: str = "quadprog"
     ):
         """Initializes the class.
 
@@ -66,6 +68,7 @@ class TorqueStanceLegController(leg_controller.LegController):
         self._desired_body_height = desired_body_height
         self._num_legs = num_legs
         self._friction_coeffs = np.array(friction_coeffs)
+        self._solver_name = solver_name
 
     def reset(self, current_time):
         del current_time
@@ -123,8 +126,19 @@ class TorqueStanceLegController(leg_controller.LegController):
         # Desired ddq
         desired_ddq = KP * (desired_q - robot_q) + KD * (desired_dq - robot_dq)
         desired_ddq = np.clip(desired_ddq, MIN_DDQ, MAX_DDQ)
-        contact_forces = qp_torque_optimizer.compute_contact_force(
-            self._robot, desired_ddq, contacts=contacts)
+        try:
+            # Attempt to use the solver
+            if self._solver_name == "quadprog":
+                contact_forces = qp_torque_optimizer.compute_contact_force(
+                    self._robot, desired_ddq, contacts=contacts)
+            else:
+                # This assumes that all other solvers are handled by cvxpy
+                contact_forces = qp_torque_optimizer_cvxpy.compute_contact_force(
+                    self._robot, desired_ddq, contacts=contacts, solver_name=self._solver_name)
+        except Exception as e:
+            # Handle specific exceptions if you can identify them, like ImportError
+            print(f"Error occurred: {e}")
+            print(f"The solver '{self._solver_name}' might not be installed.")
 
         action = {}
         for leg_id, force in enumerate(contact_forces):
