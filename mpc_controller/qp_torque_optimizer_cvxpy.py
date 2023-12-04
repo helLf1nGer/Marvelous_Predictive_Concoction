@@ -117,7 +117,7 @@ def compute_contact_force(robot,
     G += 1e-4 * np.eye(12)
 
     prob = cp.Problem(objective, constraints)
-    prob.solve(solver=cp.CLARABEL)
+    prob.solve(solver=cp.OSQP, eps_abs=1e-5)
 
     contact_forces = forces.value
     # print("contact_forces: ", contact_forces)
