@@ -6,22 +6,16 @@ https://arxiv.org/abs/2009.10019
 
 import numpy as np
 # import numba
-import quadprog  # pytype:disable=import-error
+# import quadprog  # pytype:disable=import-error
+from pyomo.environ import ConcreteModel, Var, Objective, Constraint, minimize, NonNegativeReals, SolverFactory
+from pyomo.opt import SolverStatus, TerminationCondition
+
 np.set_printoptions(precision=3, suppress=True)
 
 ACC_WEIGHT = np.array([1., 1., 1., 10., 10, 1.])
 
-# open("log_quadprog.txt", "w").close()  # Clear the log file
-# # log the matrix to file
-
-
-# def log_to_file(message, file_path="log_quadprog.txt"):
-#     with open(file_path, "a") as log_file:
-#         log_file.write(message + "\n")
 
 # @numba.jit(nopython=True, parallel=True, cache=True)
-
-
 def compute_mass_matrix(robot_mass, robot_inertia, foot_positions):
     # yaw = 0.  # Set yaw to 0 for now as all commands are local.
     # rot_z = np.array([[np.cos(yaw), np.sin(yaw), 0.],
@@ -81,33 +75,42 @@ def compute_objective_matrix(mass_matrix, desired_acc, acc_weight, reg_weight):
     Q = np.diag(acc_weight)
     R = np.ones(12) * reg_weight
 
-    quad_term = mass_matrix.T.dot(Q).dot(mass_matrix) + R
+    pre_quad_term = mass_matrix.T.dot(Q).dot(mass_matrix)
+    quad_term = (pre_quad_term + pre_quad_term.T) / \
+        2 + np.eye(12) * R  # Ensure symmetry
     linear_term = 1 * (g + desired_acc).T.dot(Q).dot(mass_matrix)
     return quad_term, linear_term
 
 
-def compute_contact_force(robot,
-                          desired_acc,
-                          contacts,
-                          acc_weight=ACC_WEIGHT,
-                          reg_weight=1e-4,
-                          friction_coef=0.45,
-                          f_min_ratio=0.1,
-                          f_max_ratio=10.):
-    mass_matrix = compute_mass_matrix(
-        robot.MPC_BODY_MASS,
-        np.array(robot.MPC_BODY_INERTIA).reshape((3, 3)),
-        robot.GetFootPositionsInBaseFrame())
-    G, a = compute_objective_matrix(mass_matrix, desired_acc, acc_weight,
-                                    reg_weight)
-    # log_to_file("G (quadprog): " + str(G))
-    # log_to_file("a (quadprog): " + str(a))
-    C, b = compute_constraint_matrix(robot.MPC_BODY_MASS, contacts,
-                                     friction_coef, f_min_ratio, f_max_ratio)
-    # log_to_file("C (quadprog): " + str(C))
-    # log_to_file("b (quadprog): " + str(b))
-
+def compute_contact_force(robot, desired_acc, contacts, acc_weight=ACC_WEIGHT, reg_weight=1e-4, friction_coef=0.45, f_min_ratio=0.1, f_max_ratio=10.):
+    mass_matrix = compute_mass_matrix(robot.MPC_BODY_MASS, np.array(
+        robot.MPC_BODY_INERTIA).reshape((3, 3)), robot.GetFootPositionsInBaseFrame())
+    G, a = compute_objective_matrix(
+        mass_matrix, desired_acc, acc_weight, reg_weight)
+    C, b = compute_constraint_matrix(
+        robot.MPC_BODY_MASS, contacts, friction_coef, f_min_ratio, f_max_ratio)
     G += 1e-4 * np.eye(12)
-    result = quadprog.solve_qp(G, a, C, b)
-    # print("result: ", result[0])
-    return -result[0].reshape((4, 3))
+
+    model = ConcreteModel()
+    model.forces = Var(range(12))
+
+    # Corrected Objective
+    def obj_expression(model):
+        return 0.5 * sum(G[i, j] * model.forces[i] * model.forces[j] for i in range(12) for j in range(12)) + sum(a[i] * model.forces[i] for i in range(12))
+
+    model.objective = Objective(rule=obj_expression, sense=minimize)
+
+    # Constraints
+    def con_rule(model, i):
+        return sum(C[i, j] * model.forces[j] for j in range(12)) >= b[i]
+
+    model.constraints = Constraint(range(24), rule=con_rule)
+
+    solver = SolverFactory('ipopt')
+    solution = solver.solve(model)
+
+    if (solution.solver.status == SolverStatus.ok) and (solution.solver.termination_condition == TerminationCondition.optimal):
+        return np.array([-model.forces[i].value for i in range(12)]).reshape((4, 3))
+    else:
+        print("Solver failed to find optimal solution")
+        return None

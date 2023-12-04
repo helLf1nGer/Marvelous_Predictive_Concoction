@@ -7,6 +7,8 @@ https://arxiv.org/abs/2009.10019
 import numpy as np
 # import numba
 import quadprog  # pytype:disable=import-error
+import cvxpy as cp
+
 np.set_printoptions(precision=3, suppress=True)
 
 ACC_WEIGHT = np.array([1., 1., 1., 10., 10, 1.])
@@ -86,6 +88,27 @@ def compute_objective_matrix(mass_matrix, desired_acc, acc_weight, reg_weight):
     return quad_term, linear_term
 
 
+def prepare_input_data(robot, desired_acc, contacts, acc_weight, reg_weight, friction_coef, f_min_ratio, f_max_ratio):
+    mass_matrix = compute_mass_matrix(robot.MPC_BODY_MASS, np.array(
+        robot.MPC_BODY_INERTIA).reshape((3, 3)), robot.GetFootPositionsInBaseFrame())
+    G, a = compute_objective_matrix(
+        mass_matrix, desired_acc, acc_weight, reg_weight)
+    C, b = compute_constraint_matrix(
+        robot.MPC_BODY_MASS, contacts, friction_coef, f_min_ratio, f_max_ratio)
+    return G, a, C, b
+
+# Function to solve using CVXPY
+
+
+def solve_with_cvxpy(G, a, C, b):
+    forces = cp.Variable(12)
+    objective = cp.Minimize(1/2 * cp.quad_form(forces, G) - a.T @ forces)
+    constraints = [C.T @ forces >= b]
+    prob = cp.Problem(objective, constraints)
+    prob.solve(solver=cp.GUROBI, eps_abs=1e-5)
+    return -forces.value.reshape((4, 3))
+
+
 def compute_contact_force(robot,
                           desired_acc,
                           contacts,
@@ -109,5 +132,18 @@ def compute_contact_force(robot,
 
     G += 1e-4 * np.eye(12)
     result = quadprog.solve_qp(G, a, C, b)
-    # print("result: ", result[0])
+
+    # --comparison
+
+    # Solve using CVXPY
+    cvxpy_solution = solve_with_cvxpy(G, a, C, b)
+    print("CVXPY solution:\n", cvxpy_solution)
+
+    # Solve using Quadprog
+    print("Quadprog solution:\n", -result[0].reshape((4, 3)))
+
+    # Compare solutions
+    difference = np.linalg.norm(cvxpy_solution - (-result[0].reshape((4, 3))))
+    print("Difference between solutions:", difference)
+
     return -result[0].reshape((4, 3))
