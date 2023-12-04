@@ -126,15 +126,16 @@ class TorqueStanceLegController(leg_controller.LegController):
         # Desired ddq
         desired_ddq = KP * (desired_q - robot_q) + KD * (desired_dq - robot_dq)
         desired_ddq = np.clip(desired_ddq, MIN_DDQ, MAX_DDQ)
+        solver_name_upper = self._solver_name.upper()
         try:
             # Attempt to use the solver
-            if self._solver_name == "quadprog":
+            if solver_name_upper == "QUADPROG":
                 contact_forces = qp_torque_optimizer.compute_contact_force(
                     self._robot, desired_ddq, contacts=contacts)
             else:
                 # This assumes that all other solvers are handled by cvxpy
                 contact_forces = qp_torque_optimizer_cvxpy.compute_contact_force(
-                    self._robot, desired_ddq, contacts=contacts, solver_name=self._solver_name)
+                    self._robot, desired_ddq, contacts=contacts, solver_name=solver_name_upper)
         except Exception as e:
             # Handle specific exceptions if you can identify them, like ImportError
             print(f"Error occurred: {e}")
