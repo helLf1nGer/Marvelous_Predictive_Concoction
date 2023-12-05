@@ -1,4 +1,11 @@
 """Example of whole body controller on A1 robot."""
+import os
+import inspect
+currentdir = os.path.dirname(os.path.abspath(
+    inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(os.path.dirname(currentdir))
+os.sys.path.insert(0, parentdir)
+
 from motion_imitation.robots.gamepad import gamepad_reader
 from motion_imitation.robots import robot_config
 from motion_imitation.robots import a1
@@ -18,13 +25,6 @@ from datetime import datetime
 from absl import logging
 from absl import flags
 from absl import app
-import os
-import inspect
-currentdir = os.path.dirname(os.path.abspath(
-    inspect.getfile(inspect.currentframe())))
-parentdir = os.path.dirname(os.path.dirname(currentdir))
-os.sys.path.insert(0, parentdir)
-
 
 # from mpc_controller import torque_stance_leg_controller
 # import mpc_osqp
