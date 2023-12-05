@@ -36,6 +36,7 @@ flags.DEFINE_bool("use_gamepad", False,
 flags.DEFINE_bool("use_real_robot", False,
                   "whether to use real robot or simulation")
 flags.DEFINE_bool("show_gui", False, "whether to show GUI.")
+flags.DEFINE_bool("gui_server", False, "Whether to connect to an existing pybullet GUI_SERVER.")
 flags.DEFINE_float("max_time_secs", 1., "maximum time to run the robot.")
 flags.DEFINE_bool("bumpy_terrain", False,
                   "whether to use bumpy or flat terrain.")
@@ -197,6 +198,9 @@ def main(argv):
     # Construct simulator
     if FLAGS.show_gui and not FLAGS.use_real_robot:
         p = bullet_client.BulletClient(connection_mode=pybullet.GUI)
+    elif FLAGS.gui_server:
+        p = bullet_client.BulletClient(connection_mode=pybullet.SHARED_MEMORY)
+        p.resetSimulation()
     else:
         p = bullet_client.BulletClient(connection_mode=pybullet.DIRECT)
     p.setPhysicsEngineParameter(numSolverIterations=30)
