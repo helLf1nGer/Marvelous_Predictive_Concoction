@@ -31,6 +31,8 @@ from absl import app
 
 
 flags.DEFINE_string("logdir", None, "where to log trajectories.")
+flags.DEFINE_string("video_filepath", None,
+                    "If set, save a video here. Should end with .mp4. Requires moviepy.")
 flags.DEFINE_bool("use_gamepad", False,
                   "whether to use gamepad to provide control input.")
 flags.DEFINE_bool("use_real_robot", False,
@@ -44,8 +46,9 @@ flags.DEFINE_string("solver", "quadprog",
                     "The QP solver to use. Options are 'quadprog', 'OSQP', or any other CVXPY solvers .")
 FLAGS = flags.FLAGS
 
-_NUM_SIMULATION_ITERATION_STEPS = 300
-_MAX_TIME_SECONDS = 30.
+VIDEO_FPS = 50
+VIDEO_TIMESTEP = 1 / VIDEO_FPS
+VIDEO_DIMENSIONS = (480, 360)
 
 _STANCE_DURATION_SECONDS = [
     0.3
@@ -194,6 +197,11 @@ def load_bumpy_terrain(pybullet_client, using_gui):
 def main(argv):
     """Runs the locomotion controller example."""
     del argv  # unused
+    if FLAGS.video_filepath:
+        import moviepy.editor
+        directory = os.path.dirname(FLAGS.video_filepath)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
 
     # Construct simulator
     if FLAGS.show_gui and not FLAGS.use_real_robot:
@@ -201,6 +209,8 @@ def main(argv):
     elif FLAGS.gui_server:
         p = bullet_client.BulletClient(connection_mode=pybullet.SHARED_MEMORY)
         p.resetSimulation()
+        p.resetDebugVisualizerCamera(cameraDistance=1, cameraYaw=0, cameraPitch=-30,
+                                     cameraTargetPosition=(0, 0, 0))
     else:
         p = bullet_client.BulletClient(connection_mode=pybullet.DIRECT)
     p.setPhysicsEngineParameter(numSolverIterations=30)
@@ -247,6 +257,7 @@ def main(argv):
     start_time = robot.GetTimeSinceReset()
     current_time = start_time
     com_vels, imu_rates, actions = [], [], []
+    video_frames = []
     while current_time - start_time < FLAGS.max_time_secs:
         start_time_robot = current_time
         start_time_wall = time.time()
@@ -263,6 +274,9 @@ def main(argv):
         actions.append(hybrid_action)
         robot.Step(hybrid_action)
         current_time = robot.GetTimeSinceReset()
+        if FLAGS.video_filepath and current_time >= len(video_frames) * VIDEO_TIMESTEP:
+          img = p.getCameraImage(*VIDEO_DIMENSIONS, renderer=p.ER_BULLET_HARDWARE_OPENGL)[2][:,:,:3]
+          video_frames.append(img)
 
         if not FLAGS.use_real_robot:
             expected_duration = current_time - start_time_robot
@@ -278,7 +292,9 @@ def main(argv):
                  com_vels=com_vels,
                  imu_rates=imu_rates)
         logging.info("logged to: {}".format(logdir))
-    # controller = _setup_controller(robot, FLAGS.solver)
+    if len(video_frames):
+      clip = moviepy.editor.ImageSequenceClip(video_frames, fps=VIDEO_FPS)
+      clip.write_videofile(FLAGS.video_filepath)
 
 
 if __name__ == "__main__":
