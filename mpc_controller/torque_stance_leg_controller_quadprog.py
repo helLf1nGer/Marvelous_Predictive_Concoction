@@ -14,6 +14,7 @@ from mpc_controller import gait_generator as gait_generator_lib
 from mpc_controller import leg_controller
 from mpc_controller import qp_torque_optimizer_cvxpy
 from mpc_controller import qp_torque_optimizer
+import time
 
 _FORCE_DIMENSION = 3
 KP = np.array((0., 0., 100., 100., 100., 0.))
@@ -127,6 +128,7 @@ class TorqueStanceLegController(leg_controller.LegController):
         desired_ddq = KP * (desired_q - robot_q) + KD * (desired_dq - robot_dq)
         desired_ddq = np.clip(desired_ddq, MIN_DDQ, MAX_DDQ)
         solver_name_upper = self._solver_name.upper()
+        start = time.time()
         try:
             # Attempt to use the solver
             if solver_name_upper == "QUADPROG":
@@ -141,6 +143,7 @@ class TorqueStanceLegController(leg_controller.LegController):
             print(f"Error occurred: {e}")
             print(f"The solver '{self._solver_name}' might not be installed.")
 
+        solve_time = time.time() - start
         action = {}
         for leg_id, force in enumerate(contact_forces):
             # While "Lose Contact" is useful in simulation, in real environment it's
@@ -153,4 +156,4 @@ class TorqueStanceLegController(leg_controller.LegController):
 
             for joint_id, torque in motor_torques.items():
                 action[joint_id] = (0, 0, 0, 0, torque)
-        return action, contact_forces
+        return action, solve_time #contact_forces

@@ -48,7 +48,8 @@ FLAGS = flags.FLAGS
 
 VIDEO_FPS = 50
 VIDEO_TIMESTEP = 1 / VIDEO_FPS
-VIDEO_DIMENSIONS = (480, 360)
+# VIDEO_DIMENSIONS = (480, 360)
+VIDEO_DIMENSIONS = (960, 720)
 
 _STANCE_DURATION_SECONDS = [
     0.3
@@ -87,14 +88,26 @@ _INIT_LEG_STATE = (
     gait_generator_lib.LegState.SWING,
 )
 
+# Pacing?
+# _DUTY_FACTOR = [0.6] * 4
+# _INIT_PHASE_FULL_CYCLE = [0.9, 0.9, 0, 0]
+
+# _INIT_LEG_STATE = (
+#     gait_generator_lib.LegState.STANCE,
+#     gait_generator_lib.LegState.SWING,
+#     gait_generator_lib.LegState.STANCE,
+#     gait_generator_lib.LegState.SWING,
+# )
+
 
 def _generate_example_linear_angular_speed(t):
     """Creates an example speed profile based on time for demo purpose."""
+    # return (.6, 0, 0), 0, False
     vx = 0.6
     vy = 0.2
     wz = 0.8
 
-    time_points = (0, 5, 10, 15, 20, 25, 30)
+    time_points = (0, 2, 4, 15, 20, 25, 30)
     speed_points = ((0, 0, 0, 0), (0, 0, 0, wz), (vx, 0, 0, 0), (0, 0, 0, -wz),
                     (0, -vy, 0, 0), (0, 0, 0, 0), (0, 0, 0, wz))
 
@@ -189,6 +202,7 @@ def load_bumpy_terrain(pybullet_client, using_gui):
     texture_id = pybullet_client.loadTexture("checker_blue.png")
     pybullet_client.changeVisualShape(
         terrain, -1, textureUniqueId=texture_id, rgbaColor=(1, 1, 1, 1))
+    pybullet_client.changeDynamics(terrain, -1, lateralFriction=1)
     if using_gui:
         pybullet_client.configureDebugVisualizer(
             pybullet_client.COV_ENABLE_RENDERING, 1)
@@ -197,6 +211,7 @@ def load_bumpy_terrain(pybullet_client, using_gui):
 def main(argv):
     """Runs the locomotion controller example."""
     del argv  # unused
+    start_real_time = time.time()
     if FLAGS.video_filepath:
         import moviepy.editor
         directory = os.path.dirname(FLAGS.video_filepath)
@@ -219,7 +234,7 @@ def main(argv):
     p.setPhysicsEngineParameter(enableConeFriction=0)
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     if FLAGS.bumpy_terrain:
-        load_bumpy_terrain(p, FLAGS.show_gui)
+        load_bumpy_terrain(p, FLAGS.show_gui or FLAGS.gui_server)
     else:
         p.loadURDF("plane.urdf")
 
@@ -250,14 +265,15 @@ def main(argv):
         command_function = _generate_example_linear_angular_speed
 
     if FLAGS.logdir:
-        logdir = os.path.join(FLAGS.logdir,
-                              datetime.now().strftime('%Y_%m_%d_%H_%M_%S'))
-        os.makedirs(logdir)
+        logdir = FLAGS.logdir #os.path.join(FLAGS.logdir,
+                            #   datetime.now().strftime('%Y_%m_%d_%H_%M_%S'))
+        # os.makedirs(logdir)
 
     start_time = robot.GetTimeSinceReset()
     current_time = start_time
     com_vels, imu_rates, actions = [], [], []
     video_frames = []
+    solve_times = []
     while current_time - start_time < FLAGS.max_time_secs:
         start_time_robot = current_time
         start_time_wall = time.time()
@@ -268,14 +284,16 @@ def main(argv):
             break
         _update_controller_params(controller, lin_speed, ang_speed)
         controller.update()
-        hybrid_action, _ = controller.get_action()
+        hybrid_action, info = controller.get_action()
+        solve_times.append(info["qp_sol"])
         com_vels.append(np.array(robot.GetBaseVelocity()).copy())
+        # print(np.linalg.norm(com_vels[-1][:2]))
         imu_rates.append(np.array(robot.GetBaseRollPitchYawRate()).copy())
         actions.append(hybrid_action)
         robot.Step(hybrid_action)
         current_time = robot.GetTimeSinceReset()
         if FLAGS.video_filepath and current_time >= len(video_frames) * VIDEO_TIMESTEP:
-          img = p.getCameraImage(*VIDEO_DIMENSIONS, renderer=p.ER_BULLET_HARDWARE_OPENGL)[2][:,:,:3]
+          img = np.asarray(p.getCameraImage(*VIDEO_DIMENSIONS, renderer=p.ER_BULLET_HARDWARE_OPENGL)[2])[:,:,:3]
           video_frames.append(img)
 
         if not FLAGS.use_real_robot:
@@ -283,14 +301,16 @@ def main(argv):
             actual_duration = time.time() - start_time_wall
             if actual_duration < expected_duration:
                 time.sleep(expected_duration - actual_duration)
+    print(f'time {time.time() - start_real_time}')
     if FLAGS.use_gamepad:
         gamepad.stop()
 
     if FLAGS.logdir:
-        np.savez(os.path.join(logdir, 'action.npz'),
-                 action=actions,
-                 com_vels=com_vels,
-                 imu_rates=imu_rates)
+        np.savetxt(os.path.join(logdir, f'{FLAGS.solver}_solve_times.csv'), solve_times)
+        # np.savez(os.path.join(logdir, 'action.npz'),
+        #          action=actions,
+        #          com_vels=com_vels,
+        #          imu_rates=imu_rates)
         logging.info("logged to: {}".format(logdir))
     if len(video_frames):
       clip = moviepy.editor.ImageSequenceClip(video_frames, fps=VIDEO_FPS)
