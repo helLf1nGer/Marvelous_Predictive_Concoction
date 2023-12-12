@@ -1,4 +1,23 @@
 """Example of whole body controller on A1 robot."""
+from absl import app
+from absl import flags
+from absl import logging
+from datetime import datetime
+import numpy as np
+import scipy.interpolate
+import time
+import pybullet_data
+from pybullet_utils import bullet_client
+import pybullet  # pytype:disable=import-error
+from mpc_controller import com_velocity_estimator
+from mpc_controller import gait_generator as gait_generator_lib
+from mpc_controller import locomotion_controller
+from mpc_controller import openloop_gait_generator
+from mpc_controller import raibert_swing_leg_controller
+from mpc_controller import torque_stance_leg_controller_quadprog as torque_stance_leg_controller
+from motion_imitation.robots import a1
+from motion_imitation.robots import robot_config
+from motion_imitation.robots.gamepad import gamepad_reader
 import os
 import inspect
 currentdir = os.path.dirname(os.path.abspath(
@@ -6,25 +25,6 @@ currentdir = os.path.dirname(os.path.abspath(
 parentdir = os.path.dirname(os.path.dirname(currentdir))
 os.sys.path.insert(0, parentdir)
 
-from motion_imitation.robots.gamepad import gamepad_reader
-from motion_imitation.robots import robot_config
-from motion_imitation.robots import a1
-from mpc_controller import torque_stance_leg_controller_quadprog as torque_stance_leg_controller
-from mpc_controller import raibert_swing_leg_controller
-from mpc_controller import openloop_gait_generator
-from mpc_controller import locomotion_controller
-from mpc_controller import gait_generator as gait_generator_lib
-from mpc_controller import com_velocity_estimator
-import pybullet  # pytype:disable=import-error
-from pybullet_utils import bullet_client
-import pybullet_data
-import time
-import scipy.interpolate
-import numpy as np
-from datetime import datetime
-from absl import logging
-from absl import flags
-from absl import app
 
 # from mpc_controller import torque_stance_leg_controller
 # import mpc_osqp
@@ -38,7 +38,8 @@ flags.DEFINE_bool("use_gamepad", False,
 flags.DEFINE_bool("use_real_robot", False,
                   "whether to use real robot or simulation")
 flags.DEFINE_bool("show_gui", False, "whether to show GUI.")
-flags.DEFINE_bool("gui_server", False, "Whether to connect to an existing pybullet GUI_SERVER.")
+flags.DEFINE_bool("gui_server", False,
+                  "Whether to connect to an existing pybullet GUI_SERVER.")
 flags.DEFINE_float("max_time_secs", 1., "maximum time to run the robot.")
 flags.DEFINE_bool("bumpy_terrain", False,
                   "whether to use bumpy or flat terrain.")
@@ -275,8 +276,11 @@ def main(argv):
         robot.Step(hybrid_action)
         current_time = robot.GetTimeSinceReset()
         if FLAGS.video_filepath and current_time >= len(video_frames) * VIDEO_TIMESTEP:
-          img = p.getCameraImage(*VIDEO_DIMENSIONS, renderer=p.ER_BULLET_HARDWARE_OPENGL)[2][:,:,:3]
-          video_frames.append(img)
+            width, height, img, depth, mask = p.getCameraImage(
+                *VIDEO_DIMENSIONS, renderer=p.ER_BULLET_HARDWARE_OPENGL)
+            # Assuming 'img' is a flat array with RGBA values
+            img_np = np.reshape(img, (height, width, 4))
+            img_rgb = img_np[:, :, :3]  # Extracting only the RGB channels
 
         if not FLAGS.use_real_robot:
             expected_duration = current_time - start_time_robot
@@ -293,8 +297,8 @@ def main(argv):
                  imu_rates=imu_rates)
         logging.info("logged to: {}".format(logdir))
     if len(video_frames):
-      clip = moviepy.editor.ImageSequenceClip(video_frames, fps=VIDEO_FPS)
-      clip.write_videofile(FLAGS.video_filepath)
+        clip = moviepy.editor.ImageSequenceClip(video_frames, fps=VIDEO_FPS)
+        clip.write_videofile(FLAGS.video_filepath)
 
 
 if __name__ == "__main__":
